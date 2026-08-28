@@ -1,8 +1,10 @@
 import io
+import json
+import os
 import smtplib
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.mime.application import MIMEApplication
 
 import streamlit as st
 from groq import Groq
@@ -12,23 +14,39 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from streamlit_local_storage import LocalStorage
 
-# Page Configuration
+# Configuration de la page Streamlit
 st.set_page_config(page_title="Logiciel de Gestion de Rapports IA", page_icon="📋", layout="wide")
 
-# Initialisation du module de stockage local du navigateur
+# Initialisation du stockage local navigateur
 local_storage = LocalStorage()
 
-# ==========================================
-# 1. GESTION DE L'E-MAIL DANS LE NAVIGATEUR (LOCALSTORAGE)
-# ==========================================
-# Récupération de l'e-mail sauvegardé dans le navigateur de cet appareil
-email_sauvegarde = local_storage.getItem("email_defaut_utilisateur")
+# Fichier JSON pour la persistance de l'historique
+HISTORIQUE_FILE = "historique.json"
 
-if "email_defaut" not in st.session_state:
-    st.session_state["email_defaut"] = email_sauvegarde if email_sauvegarde else ""
+# ==========================================
+# FONCTIONS DE GESTION DE L'HISTORIQUE PERSISTANT (JSON)
+# ==========================================
+def charger_historique():
+    """Charge l'historique depuis le fichier JSON s'il existe."""
+    if os.path.exists(HISTORIQUE_FILE):
+        try:
+            with open(HISTORIQUE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
 
+def sauvegarder_historique(historique):
+    """Sauvegarde l'historique dans le fichier JSON."""
+    try:
+        with open(HISTORIQUE_FILE, "w", encoding="utf-8") as f:
+            json.dump(historique, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        st.error(f"Erreur lors de la sauvegarde de l'historique : {e}")
+
+# Initialisation de la mémoire de session avec les données du fichier JSON
 if "historique_rapports" not in st.session_state:
-    st.session_state["historique_rapports"] = {}
+    st.session_state["historique_rapports"] = charger_historique()
 
 # Configuration de la clé API Groq
 if "GROQ_API_KEY" in st.secrets:
@@ -46,11 +64,11 @@ SMTP_EMAIL = st.secrets.get("SMTP_EMAIL", "")
 SMTP_PASSWORD = st.secrets.get("SMTP_PASSWORD", "")
 
 # ==========================================
-# 2. BARRE LATÉRALE - CONFIGURATION DESTINATAIRE INDIVIDUEL
+# 1. BARRE LATÉRALE - CONFIGURATION DESTINATAIRE INDIVIDUEL ET GESTION HISTORIQUE
 # ==========================================
 st.sidebar.title("⚙️ Configuration Appareil")
 
-# Détection de l'e-mail dans le stockage local
+# Détection de l'e-mail dans le stockage local du navigateur
 email_actuel = local_storage.getItem("email_defaut_utilisateur")
 
 if not email_actuel:
@@ -69,6 +87,18 @@ else:
     if st.sidebar.button("Changer l'e-mail sur cet appareil"):
         local_storage.deleteItem("email_defaut_utilisateur")
         st.session_state["email_defaut"] = ""
+        st.rerun()
+
+st.sidebar.markdown("---")
+st.sidebar.title("📁 Gestion de l'Historique")
+nbr_rapports = len(st.session_state["historique_rapports"])
+st.sidebar.write(f"Nombre de rapports enregistrés : **{nbr_rapports}**")
+
+if nbr_rapports > 0:
+    if st.sidebar.button("🗑️ Effacer tout l'historique"):
+        st.session_state["historique_rapports"] = {}
+        sauvegarder_historique({})
+        st.sidebar.success("Historique réinitialisé avec succès.")
         st.rerun()
 
 # Configuration visuelle des 3 niveaux de gravité
@@ -94,7 +124,7 @@ st.title("📋 Logiciel Professionnel de Rédaction de Rapports")
 st.caption("Évaluation automatique du niveau de gravité par l'IA")
 
 # ==========================================
-# 3. FONCTION D'ENVOI E-MAIL SMTP
+# 2. FONCTION D'ENVOI E-MAIL SMTP
 # ==========================================
 def envoyer_email_rapport(destinataire, sujet, corps, pdf_data, pdf_filename):
     if not SMTP_EMAIL or not SMTP_PASSWORD:
@@ -122,7 +152,7 @@ def envoyer_email_rapport(destinataire, sujet, corps, pdf_data, pdf_filename):
         return False, f"Erreur d'envoi d'e-mail : {str(e)}"
 
 # ==========================================
-# 4. FORMULAIRE ET DONNÉES ENTRANTES
+# 3. FORMULAIRE ET DONNÉES ENTRANTES
 # ==========================================
 col_left, col_right = st.columns([1, 1])
 
@@ -176,7 +206,7 @@ else:
     email_destinataire_final = st.text_input("Saisissez l'adresse e-mail du destinataire :")
 
 # ==========================================
-# 5. GÉNÉRATION PDF (CERCLE DE GRAVITÉ EN HAUT À GAUCHE)
+# 4. GÉNÉRATION PDF (CERCLE DE GRAVITÉ EN HAUT À GAUCHE)
 # ==========================================
 def generer_pdf(entreprise, redacteur, email_red, gravite_key, titre, contenu):
     buffer = io.BytesIO()
@@ -230,7 +260,7 @@ def generer_pdf(entreprise, redacteur, email_red, gravite_key, titre, contenu):
     return buffer.getvalue()
 
 # ==========================================
-# 6. EXÉCUTION, ANALYSE IA ET ENVOI AUTOMATIQUE
+# 5. EXÉCUTION, ANALYSE IA ET SAUVEGARDE HISTORIQUE
 # ==========================================
 if st.button("🚀 Générer et Envoyer le Rapport"):
     if not email_destinataire_final:
@@ -304,13 +334,17 @@ if st.button("🚀 Générer et Envoyer le Rapport"):
                 else:
                     texte_structure = reponse_brute.strip()
 
-                # Sauvegarde historique dans la session
-                st.session_state["historique_rapports"][titre_rapport] = {
+                # ----------------------------------------------------
+                # SAUVEGARDE DANS LE FICHIER HISTORIQUE JSON
+                # ----------------------------------------------------
+                cle_rapport = titre_rapport.strip()
+                st.session_state["historique_rapports"][cle_rapport] = {
                     "entreprise": nom_entreprise,
                     "redacteur": nom_redacteur,
                     "gravite": gravite_detectee,
                     "texte": texte_structure
                 }
+                sauvegarder_historique(st.session_state["historique_rapports"])
 
                 # Affichage Cercle de Gravité en haut à gauche
                 cfg_g = GRAVITE_CONFIG[gravite_detectee]
