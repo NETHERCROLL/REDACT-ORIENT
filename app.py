@@ -1,4 +1,6 @@
 import io
+import os
+import re
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -14,16 +16,32 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 # Page Configuration
 st.set_page_config(page_title="Logiciel de Gestion de Rapports IA", page_icon="📋", layout="wide")
 
+# Fichier local de stockage permanent de l'email destinataire par défaut
+EMAIL_STORAGE_FILE = "email_defaut.txt"
+
 # ==========================================
-# 1. INITIALISATION DES SESSIONS & HISTORIQUE
+# 1. GESTION PERSISTANTE DE L'E-MAIL PAR DÉFAUT
 # ==========================================
+def lire_email_defaut():
+    """Lit l'adresse e-mail enregistrée dans le fichier local."""
+    if os.path.exists(EMAIL_STORAGE_FILE):
+        with open(EMAIL_STORAGE_FILE, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    return ""
+
+def sauvegarder_email_defaut(email):
+    """Sauvegarde l'adresse e-mail dans le fichier local."""
+    with open(EMAIL_STORAGE_FILE, "w", encoding="utf-8") as f:
+        f.write(email.strip())
+
+# Initialisation dans session_state à partir du fichier
+if "email_defaut" not in st.session_state:
+    st.session_state["email_defaut"] = lire_email_defaut()
+
 if "historique_rapports" not in st.session_state:
     st.session_state["historique_rapports"] = {}
 
-if "email_defaut" not in st.session_state:
-    st.session_state["email_defaut"] = ""
-
-# Clé API Groq
+# Configuration de la clé API Groq
 if "GROQ_API_KEY" in st.secrets:
     client_groq = Groq(api_key=st.secrets["GROQ_API_KEY"])
 else:
@@ -32,65 +50,67 @@ else:
 
 GROQ_MODEL = "openai/gpt-oss-20b"
 
-# ==========================================
-# 2. CONFIGURATION SMTP (EXPÉDITEUR E-MAIL)
-# ==========================================
-# Récupération des secrets SMTP s'ils existent
+# Configuration SMTP d'expédition
 SMTP_SERVER = st.secrets.get("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(st.secrets.get("SMTP_PORT", 587))
 SMTP_EMAIL = st.secrets.get("SMTP_EMAIL", "")
 SMTP_PASSWORD = st.secrets.get("SMTP_PASSWORD", "")
 
-st.sidebar.title("⚙️ Configuration E-mail")
+# ==========================================
+# 2. BARRE LATÉRALE - CONFIGURATION DESTINATAIRE
+# ==========================================
+st.sidebar.title("⚙️ Configuration Logiciel")
 
-# Configuration de l'adresse par défaut destinataire
 if not st.session_state["email_defaut"]:
-    st.sidebar.warning("⚠️ E-mail destinataire par défaut requis")
+    st.sidebar.warning("⚠️ Configuration initiale requise (1 seule fois)")
     email_input = st.sidebar.text_input("Adresse e-mail destinataire par défaut :")
-    if st.sidebar.button("Enregistrer l'adresse par défaut"):
+    if st.sidebar.button("Enregistrer définitivement"):
         if "@" in email_input and "." in email_input:
+            sauvegarder_email_defaut(email_input)
             st.session_state["email_defaut"] = email_input.strip()
-            st.sidebar.success("Adresse par défaut enregistrée !")
+            st.sidebar.success("Adresse enregistrée en mémoire !")
             st.rerun()
         else:
             st.sidebar.error("Veuillez entrer une adresse e-mail valide.")
 else:
     st.sidebar.info(f"📧 Destinataire par défaut : **{st.session_state['email_defaut']}**")
-    if st.sidebar.button("Modifier l'e-mail par défaut"):
+    if st.sidebar.button("Changer l'e-mail par défaut"):
+        if os.path.exists(EMAIL_STORAGE_FILE):
+            os.remove(EMAIL_STORAGE_FILE)
         st.session_state["email_defaut"] = ""
         st.rerun()
 
-# Config des balises de gravité
+# Configuration visuelle des 3 niveaux de gravité
 GRAVITE_CONFIG = {
-    "VERT (Tout va bien)": {
-        "color": "#16A34A", 
-        "bg_pdf": colors.HexColor("#16A34A"), 
-        "label": "SITUATION NORMALE / TOUT VA BIEN", 
-        "emoji": "🟢"
+    "VERT": {
+        "color": "#16A34A",
+        "bg_pdf": colors.HexColor("#16A34A"),
+        "label": "Gravité Faible / Normal",
+        "symbol": "●"
     },
-    "JAUNE (Gravité mineure)": {
-        "color": "#D97706", 
-        "bg_pdf": colors.HexColor("#D97706"), 
-        "label": "ATTENTION / GRAVITÉ MINEURE", 
-        "emoji": "🟡"
+    "JAUNE": {
+        "color": "#D97706",
+        "bg_pdf": colors.HexColor("#D97706"),
+        "label": "Gravité Moyenne / Attention",
+        "symbol": "●"
     },
-    "ROUGE (Gravité majeure)": {
-        "color": "#DC2626", 
-        "bg_pdf": colors.HexColor("#DC2626"), 
-        "label": "ALERTE / GRAVITÉ MAJEURE", 
-        "emoji": "🔴"
+    "ROUGE": {
+        "color": "#DC2626",
+        "bg_pdf": colors.HexColor("#DC2626"),
+        "label": "Gravité Élevée / Urgence",
+        "symbol": "●"
     }
 }
 
 st.title("📋 Logiciel Professionnel de Rédaction de Rapports")
+st.caption("Évaluation automatique du niveau de gravité par l'IA")
 
 # ==========================================
-# 3. FONCTION D'ENVOI REEL DE L'E-MAIL
+# 3. FONCTION D'ENVOI E-MAIL SMTP
 # ==========================================
 def envoyer_email_rapport(destinataire, sujet, corps, pdf_data, pdf_filename):
-    """Envoie un e-mail réel avec le PDF en pièce jointe via SMTP."""
     if not SMTP_EMAIL or not SMTP_PASSWORD:
-        return False, "Les identifiants d'expédition SMTP (SMTP_EMAIL et SMTP_PASSWORD) ne sont pas configurés dans secrets.toml."
+        return False, "Identifiants SMTP d'expédition absents dans secrets.toml."
     
     try:
         msg = MIMEMultipart()
@@ -98,15 +118,12 @@ def envoyer_email_rapport(destinataire, sujet, corps, pdf_data, pdf_filename):
         msg['To'] = destinataire
         msg['Subject'] = sujet
 
-        # Corps du message
         msg.attach(MIMEText(corps, 'plain'))
 
-        # Pièce jointe PDF
         part = MIMEApplication(pdf_data, Name=pdf_filename)
         part['Content-Disposition'] = f'attachment; filename="{pdf_filename}"'
         msg.attach(part)
 
-        # Connexion au serveur SMTP et envoi
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
         server.starttls()
         server.login(SMTP_EMAIL, SMTP_PASSWORD)
@@ -117,7 +134,7 @@ def envoyer_email_rapport(destinataire, sujet, corps, pdf_data, pdf_filename):
         return False, f"Erreur d'envoi d'e-mail : {str(e)}"
 
 # ==========================================
-# 4. FORMULAIRE ET DONNÉES ENTRANTES
+# 4. FORMULAIRE ET SOURCING
 # ==========================================
 col_left, col_right = st.columns([1, 1])
 
@@ -128,9 +145,7 @@ with col_left:
     email_redacteur = st.text_input("Adresse e-mail du rédacteur (optionnel) :", placeholder="ex: j.dupont@entreprise.com")
 
 with col_right:
-    st.subheader("2. Paramètres & Transmission")
-    gravite_selectionne = st.selectbox("Niveau de gravité du rapport * :", list(GRAVITE_CONFIG.keys()))
-    
+    st.subheader("2. Paramètres du Rapport")
     mode_rapport = st.radio("Type de transmission / Action :", ["Nouveau rapport", "Modifier un ancien rapport (Mise à jour)"])
 
     rapport_existant_cle = None
@@ -144,7 +159,7 @@ with col_right:
                 list(st.session_state["historique_rapports"].keys())
             )
             contenu_ancien = st.session_state["historique_rapports"][rapport_existant_cle]["texte"]
-            st.info("L'IA ajoutera les nouvelles informations dans l'ancien rapport.")
+            st.info("L'IA intégrera les nouvelles remarques dans le rapport précédent.")
 
 st.markdown("---")
 st.subheader("3. Contenu et Destinataire")
@@ -154,21 +169,24 @@ titre_rapport = st.text_input("Titre du rapport * :", placeholder="ex: Rapport d
 notes_brutes = st.text_area(
     "Informations et faits à inclure dans le rapport * :", 
     height=150, 
-    placeholder="Entrez ici les faits bruts. L'IA les classera sous de grands titres sans rien inventer."
+    placeholder="Saisissez vos observations. L'IA analysera l'urgence/gravité et structurera les données sous de grands titres."
 )
 
-# Destinataire E-mail
-st.subheader("📬 Destinataire de l'envoi")
+# Choix du destinataire e-mail
+st.subheader("📬 Destinataire")
 choix_destinataire = st.radio("Sélection du destinataire :", ["E-mail par défaut", "Saisir un autre destinataire"], horizontal=True)
 
 if choix_destinataire == "E-mail par défaut":
     email_destinataire_final = st.session_state["email_defaut"]
-    st.write(f"Directement envoyé à : **{email_destinataire_final if email_destinataire_final else 'Non configuré'}**")
+    if email_destinataire_final:
+        st.success(f"Sera automatiquement envoyé à : **{email_destinataire_final}**")
+    else:
+        st.error("Aucun e-mail par défaut n'a encore été configuré dans le panneau de gauche.")
 else:
     email_destinataire_final = st.text_input("Saisissez l'adresse e-mail du destinataire :")
 
 # ==========================================
-# 5. GÉNÉRATION PDF (REPORTLAB)
+# 5. GÉNÉRATION PDF (CERCLE DE GRAVITÉ EN HAUT À GAUCHE)
 # ==========================================
 def generer_pdf(entreprise, redacteur, email_red, gravite_key, titre, contenu):
     buffer = io.BytesIO()
@@ -176,21 +194,14 @@ def generer_pdf(entreprise, redacteur, email_red, gravite_key, titre, contenu):
     story = []
     styles = getSampleStyleSheet()
 
-    cfg_g = GRAVITE_CONFIG[gravite_key]
+    cfg_g = GRAVITE_CONFIG.get(gravite_key, GRAVITE_CONFIG["VERT"])
 
-    # Balise de gravité
-    banner_data = [[Paragraph(f"<font color='white' size=14><b>{cfg_g['emoji']} GRAVITÉ : {cfg_g['label']}</b></font>", styles['Normal'])]]
-    t_banner = Table(banner_data, colWidths=[540])
-    t_banner.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,-1), cfg_g['bg_pdf']),
-        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-        ('TOPPADDING', (0,0), (-1,-1), 10),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 10),
-    ]))
-    story.append(t_banner)
-    story.append(Spacer(1, 12))
+    # --- 1. PUCE DE GRAVITÉ DANS LE COIN SUPÉRIEUR GAUCHE ---
+    cercle_html = f"<font color='{cfg_g['color']}' size=20><b>●</b></font> <font color='#334155' size=11><b>GRAVITÉ : {cfg_g['label'].upper()}</b></font>"
+    story.append(Paragraph(cercle_html, styles['Normal']))
+    story.append(Spacer(1, 10))
 
-    # Émetteur
+    # --- 2. INFORMATIONS ÉMETTEUR ---
     meta_text = f"<b>Entreprise :</b> {entreprise}<br/><b>Rédacteur :</b> {redacteur}"
     if email_red:
         meta_text += f"<br/><b>E-mail :</b> {email_red}"
@@ -198,21 +209,21 @@ def generer_pdf(entreprise, redacteur, email_red, gravite_key, titre, contenu):
     meta_data = [[Paragraph(meta_text, styles['Normal'])]]
     t_meta = Table(meta_data, colWidths=[540])
     t_meta.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F1F5F9")),
+        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F8FAFC")),
         ('PADDING', (0,0), (-1,-1), 8),
         ('BOX', (0,0), (-1,-1), 0.5, colors.HexColor("#CBD5E1"))
     ]))
     story.append(t_meta)
     story.append(Spacer(1, 15))
 
-    # Titre
-    title_style = ParagraphStyle('TitreStyle', parent=styles['Heading1'], fontSize=16, leading=20, textColor=colors.HexColor("#1E293B"), spaceAfter=12)
+    # --- 3. TITRE DU RAPPORT ---
+    title_style = ParagraphStyle('TitreStyle', parent=styles['Heading1'], fontSize=15, leading=19, textColor=colors.HexColor("#0F172A"), spaceAfter=12)
     story.append(Paragraph(titre.upper(), title_style))
-    story.append(Spacer(1, 10))
+    story.append(Spacer(1, 8))
 
-    # Corps
-    h2_style = ParagraphStyle('H2Style', parent=styles['Heading2'], fontSize=12, leading=16, textColor=colors.HexColor("#0F172A"), spaceBefore=10, spaceAfter=6)
-    body_style = ParagraphStyle('BodyStyle', parent=styles['Normal'], fontSize=10, leading=14, spaceAfter=6)
+    # --- 4. CORPS DU RAPPORT ---
+    h2_style = ParagraphStyle('H2Style', parent=styles['Heading2'], fontSize=11, leading=15, textColor=colors.HexColor("#1E293B"), spaceBefore=10, spaceAfter=4)
+    body_style = ParagraphStyle('BodyStyle', parent=styles['Normal'], fontSize=9.5, leading=13.5, spaceAfter=5)
 
     for line in contenu.split('\n'):
         line_str = line.strip()
@@ -222,63 +233,124 @@ def generer_pdf(entreprise, redacteur, email_red, gravite_key, titre, contenu):
         elif line_str:
             story.append(Paragraph(line_str, body_style))
         else:
-            story.append(Spacer(1, 4))
+            story.append(Spacer(1, 3))
 
     doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
 
 # ==========================================
-# 6. EXÉCUTION & ENVOI REEL
+# 6. EXÉCUTION, ANALYSE IA ET ENVOI AUTOMATIQUE
 # ==========================================
 if st.button("🚀 Générer et Envoyer le Rapport"):
     if not email_destinataire_final:
-        st.error("Veuillez renseigner un destinataire e-mail valide.")
+        st.error("Veuillez renseigner ou enregistrer un e-mail destinataire valide.")
     elif not nom_entreprise or not nom_redacteur or not titre_rapport or not notes_brutes:
         st.warning("Veuillez remplir tous les champs obligatoires (*).")
     else:
-        with st.spinner(f"Rédaction par l'IA (Groq) et préparation du PDF..."):
+        with st.spinner("Analyse automatique de la gravité et structuration du rapport via Groq..."):
             
+            # Le prompt force l'IA à déterminer la gravité et à la placer sur la toute première ligne
             if mode_rapport == "Modifier un ancien rapport (Mise à jour)" and contenu_ancien:
-                prompt_system = "Tu es un assistant strict de rédaction de rapports."
-                prompt_user = f"Consigne : Ne rajoute AUCUNE information inventée.\nExistant :\n{contenu_ancien}\nNouvelles infos :\n{notes_brutes}\nTâche : Intègre sous des grands titres avec '#'."
+                prompt_user = f"""
+                TÂCHE 1 : Évalue le niveau de gravité global des faits rapportés (choisis UNIQUEMENT entre: VERT, JAUNE, ROUGE).
+                - VERT = Situation normale, entretien de routine, légères remarques sans danger.
+                - JAUNE = Dysfonctionnement mineur, retard, problème nécessitant attention sans danger immédiat.
+                - ROUGE = Danger, accident, urgence absolue, panne majeure, non-conformité grave.
+
+                La TOUTE PREMIÈRE LIGNE de ta réponse doit être EXACTEMENT sous cette forme :
+                GRAVITE: [VERT ou JAUNE ou ROUGE]
+
+                TÂCHE 2 : Rédige le rapport mis à jour sans inventer aucun fait ni chiffre.
+                Classé sous des grands titres utilisant le symbole '#' (ex: # 1. RAPPEL DES FAITS, # 2. MISES À JOUR).
+
+                Rapport existant :
+                {contenu_ancien}
+
+                Nouvelles observations :
+                {notes_brutes}
+                """
             else:
-                prompt_system = "Tu es un assistant strict de rédaction de rapports."
-                prompt_user = f"Consigne : Ne rajoute AUCUNE information inventée.\nInfos :\n{notes_brutes}\nTâche : Organise sous de grands titres avec '#' (ex: # 1. CONTEXTE)."
+                prompt_user = f"""
+                TÂCHE 1 : Évalue le niveau de gravité global des faits ci-dessous (choisis UNIQUEMENT entre: VERT, JAUNE, ROUGE).
+                - VERT = Situation normale, entretien de routine, absence de risque.
+                - JAUNE = Problème mineur, anomalie, point d'attention.
+                - ROUGE = Risque grave, urgence, accident, panne critique.
+
+                La TOUTE PREMIÈRE LIGNE de ta réponse doit être EXACTEMENT sous cette forme :
+                GRAVITE: [VERT ou JAUNE ou ROUGE]
+
+                TÂCHE 2 : Organise les informations de façon professionnelle sans rien inventer.
+                Utilise des grands titres avec le symbole '#' (ex: # 1. CONTEXTE ET OBSERVATIONS).
+
+                Notes brutes :
+                {notes_brutes}
+                """
 
             try:
                 completion = client_groq.chat.completions.create(
                     model=GROQ_MODEL,
                     messages=[
-                        {"role": "system", "content": prompt_system},
+                        {"role": "system", "content": "Tu es un expert strict en gestion de risques et rédaction de rapports d'activité."},
                         {"role": "user", "content": prompt_user}
                     ],
-                    temperature=0.2
+                    temperature=0.1
                 )
                 
-                texte_structure = completion.choices[0].message.content
+                reponse_brute = completion.choices[0].message.content
+
+                # Extraction du niveau de gravité déterminé par l'IA
+                gravite_detectee = "VERT"
+                lines = reponse_brute.split("\n")
+                first_line = lines[0].upper()
+                
+                if "GRAVITE:" in first_line or "GRAVITÉ:" in first_line:
+                    if "ROUGE" in first_line:
+                        gravite_detectee = "ROUGE"
+                    elif "JAUNE" in first_line:
+                        gravite_detectee = "JAUNE"
+                    elif "VERT" in first_line:
+                        gravite_detectee = "VERT"
+                    # Supprimer la ligne d'en-tête technique du texte final
+                    texte_structure = "\n".join(lines[1:]).strip()
+                else:
+                    texte_structure = reponse_brute.strip()
 
                 # Sauvegarde historique
                 st.session_state["historique_rapports"][titre_rapport] = {
                     "entreprise": nom_entreprise,
                     "redacteur": nom_redacteur,
-                    "gravite": gravite_selectionne,
+                    "gravite": gravite_detectee,
                     "texte": texte_structure
                 }
 
-                # Génération du fichier PDF
+                # APERÇU ÉCRAN : Cercle de couleur + Label dans le coin supérieur gauche
+                cfg_g = GRAVITE_CONFIG[gravite_detectee]
+                st.markdown(
+                    f"<div style='display: flex; align-items: center; margin-bottom: 15px;'>"
+                    f"<span style='color: {cfg_g['color']}; font-size: 28px; margin-right: 8px;'>●</span>"
+                    f"<span style='font-weight: bold; color: #334155; font-size: 16px;'>GRAVITÉ DÉTECTÉE : {cfg_g['label'].upper()}</span>"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
+
+                st.markdown(f"**Entreprise :** {nom_entreprise} | **Rédacteur :** {nom_redacteur}")
+                st.markdown("---")
+                st.markdown(texte_structure)
+
+                # Génération du PDF
                 pdf_bytes = generer_pdf(
                     nom_entreprise, 
                     nom_redacteur, 
                     email_redacteur, 
-                    gravite_selectionne, 
+                    gravite_detectee, 
                     titre_rapport, 
                     texte_structure
                 )
 
-                # --- ENVOI DE L'E-MAIL REEL ---
-                sujet_mail = f"[{gravite_selectionne.split(' ')[0]}] {titre_rapport} - {nom_entreprise}"
-                corps_mail = f"Bonjour,\n\nVeuillez trouver ci-joint le rapport '{titre_rapport}' rédigé par {nom_redacteur} ({nom_entreprise}).\n\nNiveau de gravité : {gravite_selectionne}\n\nCordialement,"
+                # Envoi de l'e-mail automatique
+                sujet_mail = f"[{gravite_detectee}] {titre_rapport} - {nom_entreprise}"
+                corps_mail = f"Bonjour,\n\nVeuillez trouver ci-joint le rapport '{titre_rapport}' rédigé par {nom_redacteur} ({nom_entreprise}).\n\nGravité évaluée par l'IA : {cfg_g['label']}\n\nCordialement,"
                 nom_fichier_pdf = f"Rapport_{titre_rapport.replace(' ', '_')}.pdf"
 
                 succes, message_mail = envoyer_email_rapport(
@@ -290,13 +362,12 @@ if st.button("🚀 Générer et Envoyer le Rapport"):
                 )
 
                 if succes:
-                    st.success(f"✅ {message_mail} (Envoyé à {email_destinataire_final})")
+                    st.success(f"✅ {message_mail} (Envoyé automatiquement à {email_destinataire_final})")
                 else:
-                    st.error(f"❌ Le PDF a été généré mais l'e-mail n'a pas pu être envoyé : {message_mail}")
+                    st.error(f"❌ {message_mail}")
 
-                # Proposer le téléchargement manuel en alternative
                 st.download_button(
-                    label="📥 Télécharger aussi le Rapport en PDF sur ce PC",
+                    label="📥 Télécharger la copie PDF sur cet appareil",
                     data=pdf_bytes,
                     file_name=nom_fichier_pdf,
                     mime="application/pdf"
