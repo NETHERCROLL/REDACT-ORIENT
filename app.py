@@ -1,6 +1,4 @@
 import io
-import os
-import re
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -12,31 +10,22 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from streamlit_local_storage import LocalStorage
 
 # Page Configuration
 st.set_page_config(page_title="Logiciel de Gestion de Rapports IA", page_icon="📋", layout="wide")
 
-# Fichier local de stockage permanent de l'email destinataire par défaut
-EMAIL_STORAGE_FILE = "email_defaut.txt"
+# Initialisation du module de stockage local du navigateur
+local_storage = LocalStorage()
 
 # ==========================================
-# 1. GESTION PERSISTANTE DE L'E-MAIL PAR DÉFAUT
+# 1. GESTION DE L'E-MAIL DANS LE NAVIGATEUR (LOCALSTORAGE)
 # ==========================================
-def lire_email_defaut():
-    """Lit l'adresse e-mail enregistrée dans le fichier local."""
-    if os.path.exists(EMAIL_STORAGE_FILE):
-        with open(EMAIL_STORAGE_FILE, "r", encoding="utf-8") as f:
-            return f.read().strip()
-    return ""
+# Récupération de l'e-mail sauvegardé dans le navigateur de cet appareil
+email_sauvegarde = local_storage.getItem("email_defaut_utilisateur")
 
-def sauvegarder_email_defaut(email):
-    """Sauvegarde l'adresse e-mail dans le fichier local."""
-    with open(EMAIL_STORAGE_FILE, "w", encoding="utf-8") as f:
-        f.write(email.strip())
-
-# Initialisation dans session_state à partir du fichier
 if "email_defaut" not in st.session_state:
-    st.session_state["email_defaut"] = lire_email_defaut()
+    st.session_state["email_defaut"] = email_sauvegarde if email_sauvegarde else ""
 
 if "historique_rapports" not in st.session_state:
     st.session_state["historique_rapports"] = {}
@@ -57,26 +46,28 @@ SMTP_EMAIL = st.secrets.get("SMTP_EMAIL", "")
 SMTP_PASSWORD = st.secrets.get("SMTP_PASSWORD", "")
 
 # ==========================================
-# 2. BARRE LATÉRALE - CONFIGURATION DESTINATAIRE
+# 2. BARRE LATÉRALE - CONFIGURATION DESTINATAIRE INDIVIDUEL
 # ==========================================
-st.sidebar.title("⚙️ Configuration Logiciel")
+st.sidebar.title("⚙️ Configuration Appareil")
 
-if not st.session_state["email_defaut"]:
-    st.sidebar.warning("⚠️ Configuration initiale requise (1 seule fois)")
-    email_input = st.sidebar.text_input("Adresse e-mail destinataire par défaut :")
-    if st.sidebar.button("Enregistrer définitivement"):
+# Détection de l'e-mail dans le stockage local
+email_actuel = local_storage.getItem("email_defaut_utilisateur")
+
+if not email_actuel:
+    st.sidebar.warning("⚠️ Aucun e-mail par défaut sur cet appareil")
+    email_input = st.sidebar.text_input("Adresse e-mail par défaut pour cet appareil :")
+    if st.sidebar.button("Enregistrer sur cet appareil"):
         if "@" in email_input and "." in email_input:
-            sauvegarder_email_defaut(email_input)
+            local_storage.setItem("email_defaut_utilisateur", email_input.strip())
             st.session_state["email_defaut"] = email_input.strip()
-            st.sidebar.success("Adresse enregistrée en mémoire !")
+            st.sidebar.success("Enregistré dans la mémoire de votre appareil !")
             st.rerun()
         else:
             st.sidebar.error("Veuillez entrer une adresse e-mail valide.")
 else:
-    st.sidebar.info(f"📧 Destinataire par défaut : **{st.session_state['email_defaut']}**")
-    if st.sidebar.button("Changer l'e-mail par défaut"):
-        if os.path.exists(EMAIL_STORAGE_FILE):
-            os.remove(EMAIL_STORAGE_FILE)
+    st.sidebar.info(f"📱 E-mail par défaut sur cet appareil :\n**{email_actuel}**")
+    if st.sidebar.button("Changer l'e-mail sur cet appareil"):
+        local_storage.deleteItem("email_defaut_utilisateur")
         st.session_state["email_defaut"] = ""
         st.rerun()
 
@@ -85,20 +76,17 @@ GRAVITE_CONFIG = {
     "VERT": {
         "color": "#16A34A",
         "bg_pdf": colors.HexColor("#16A34A"),
-        "label": "Gravité Faible / Normal",
-        "symbol": "●"
+        "label": "Gravité Faible / Normal"
     },
     "JAUNE": {
         "color": "#D97706",
         "bg_pdf": colors.HexColor("#D97706"),
-        "label": "Gravité Moyenne / Attention",
-        "symbol": "●"
+        "label": "Gravité Moyenne / Attention"
     },
     "ROUGE": {
         "color": "#DC2626",
         "bg_pdf": colors.HexColor("#DC2626"),
-        "label": "Gravité Élevée / Urgence",
-        "symbol": "●"
+        "label": "Gravité Élevée / Urgence"
     }
 }
 
@@ -134,7 +122,7 @@ def envoyer_email_rapport(destinataire, sujet, corps, pdf_data, pdf_filename):
         return False, f"Erreur d'envoi d'e-mail : {str(e)}"
 
 # ==========================================
-# 4. FORMULAIRE ET SOURCING
+# 4. FORMULAIRE ET DONNÉES ENTRANTES
 # ==========================================
 col_left, col_right = st.columns([1, 1])
 
@@ -169,19 +157,21 @@ titre_rapport = st.text_input("Titre du rapport * :", placeholder="ex: Rapport d
 notes_brutes = st.text_area(
     "Informations et faits à inclure dans le rapport * :", 
     height=150, 
-    placeholder="Saisissez vos observations. L'IA analysera l'urgence/gravité et structurera les données sous de grands titres."
+    placeholder="Saisissez vos observations. L'IA analysera la gravité et classera vos remarques sous de grands titres."
 )
 
 # Choix du destinataire e-mail
 st.subheader("📬 Destinataire")
-choix_destinataire = st.radio("Sélection du destinataire :", ["E-mail par défaut", "Saisir un autre destinataire"], horizontal=True)
+choix_destinataire = st.radio("Sélection du destinataire :", ["E-mail par défaut de cet appareil", "Saisir un autre destinataire"], horizontal=True)
 
-if choix_destinataire == "E-mail par défaut":
-    email_destinataire_final = st.session_state["email_defaut"]
+email_defaut_appareil = local_storage.getItem("email_defaut_utilisateur")
+
+if choix_destinataire == "E-mail par défaut de cet appareil":
+    email_destinataire_final = email_defaut_appareil if email_defaut_appareil else ""
     if email_destinataire_final:
-        st.success(f"Sera automatiquement envoyé à : **{email_destinataire_final}**")
+        st.success(f"Sera envoyé à l'adresse enregistrée sur votre appareil : **{email_destinataire_final}**")
     else:
-        st.error("Aucun e-mail par défaut n'a encore été configuré dans le panneau de gauche.")
+        st.error("Aucun e-mail n'est configuré dans le panneau de gauche pour cet appareil.")
 else:
     email_destinataire_final = st.text_input("Saisissez l'adresse e-mail du destinataire :")
 
@@ -196,7 +186,7 @@ def generer_pdf(entreprise, redacteur, email_red, gravite_key, titre, contenu):
 
     cfg_g = GRAVITE_CONFIG.get(gravite_key, GRAVITE_CONFIG["VERT"])
 
-    # --- 1. PUCE DE GRAVITÉ DANS LE COIN SUPÉRIEUR GAUCHE ---
+    # --- 1. PUCE DE GRAVITÉ EN HAUT À GAUCHE ---
     cercle_html = f"<font color='{cfg_g['color']}' size=20><b>●</b></font> <font color='#334155' size=11><b>GRAVITÉ : {cfg_g['label'].upper()}</b></font>"
     story.append(Paragraph(cercle_html, styles['Normal']))
     story.append(Spacer(1, 10))
@@ -250,7 +240,6 @@ if st.button("🚀 Générer et Envoyer le Rapport"):
     else:
         with st.spinner("Analyse automatique de la gravité et structuration du rapport via Groq..."):
             
-            # Le prompt force l'IA à déterminer la gravité et à la placer sur la toute première ligne
             if mode_rapport == "Modifier un ancien rapport (Mise à jour)" and contenu_ancien:
                 prompt_user = f"""
                 TÂCHE 1 : Évalue le niveau de gravité global des faits rapportés (choisis UNIQUEMENT entre: VERT, JAUNE, ROUGE).
@@ -299,7 +288,7 @@ if st.button("🚀 Générer et Envoyer le Rapport"):
                 
                 reponse_brute = completion.choices[0].message.content
 
-                # Extraction du niveau de gravité déterminé par l'IA
+                # Extraction de la gravité
                 gravite_detectee = "VERT"
                 lines = reponse_brute.split("\n")
                 first_line = lines[0].upper()
@@ -311,12 +300,11 @@ if st.button("🚀 Générer et Envoyer le Rapport"):
                         gravite_detectee = "JAUNE"
                     elif "VERT" in first_line:
                         gravite_detectee = "VERT"
-                    # Supprimer la ligne d'en-tête technique du texte final
                     texte_structure = "\n".join(lines[1:]).strip()
                 else:
                     texte_structure = reponse_brute.strip()
 
-                # Sauvegarde historique
+                # Sauvegarde historique dans la session
                 st.session_state["historique_rapports"][titre_rapport] = {
                     "entreprise": nom_entreprise,
                     "redacteur": nom_redacteur,
@@ -324,7 +312,7 @@ if st.button("🚀 Générer et Envoyer le Rapport"):
                     "texte": texte_structure
                 }
 
-                # APERÇU ÉCRAN : Cercle de couleur + Label dans le coin supérieur gauche
+                # Affichage Cercle de Gravité en haut à gauche
                 cfg_g = GRAVITE_CONFIG[gravite_detectee]
                 st.markdown(
                     f"<div style='display: flex; align-items: center; margin-bottom: 15px;'>"
@@ -348,7 +336,7 @@ if st.button("🚀 Générer et Envoyer le Rapport"):
                     texte_structure
                 )
 
-                # Envoi de l'e-mail automatique
+                # Envoi de l'e-mail
                 sujet_mail = f"[{gravite_detectee}] {titre_rapport} - {nom_entreprise}"
                 corps_mail = f"Bonjour,\n\nVeuillez trouver ci-joint le rapport '{titre_rapport}' rédigé par {nom_redacteur} ({nom_entreprise}).\n\nGravité évaluée par l'IA : {cfg_g['label']}\n\nCordialement,"
                 nom_fichier_pdf = f"Rapport_{titre_rapport.replace(' ', '_')}.pdf"
