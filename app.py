@@ -63,6 +63,19 @@ SMTP_PORT = int(st.secrets.get("SMTP_PORT", 587))
 SMTP_EMAIL = st.secrets.get("SMTP_EMAIL", "")
 SMTP_PASSWORD = st.secrets.get("SMTP_PASSWORD", "")
 
+ # Masquage des éléments Streamlit (Mode Pro)
+  hide_streamlit_style = """
+                <style>
+                #MainMenu {visibility: hidden;}
+                footer {visibility: hidden;}
+                header {visibility: hidden;}
+                .stAppDeployButton {display:none;}
+                div[data-testid="stStatusWidget"] {visibility: hidden;}
+                </style>
+                """
+ st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
+
 # ==========================================
 # 1. BARRE LATÉRALE - CONFIGURATION DESTINATAIRE INDIVIDUEL ET GESTION HISTORIQUE
 # ==========================================
