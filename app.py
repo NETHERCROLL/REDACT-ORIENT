@@ -64,7 +64,7 @@ SMTP_EMAIL = st.secrets.get("SMTP_EMAIL", "")
 SMTP_PASSWORD = st.secrets.get("SMTP_PASSWORD", "")
 
  # Masquage des éléments Streamlit (Mode Pro)
-  hide_streamlit_style = """
+hide_streamlit_style = """
                 <style>
                 #MainMenu {visibility: hidden;}
                 footer {visibility: hidden;}
@@ -73,7 +73,7 @@ SMTP_PASSWORD = st.secrets.get("SMTP_PASSWORD", "")
                 div[data-testid="stStatusWidget"] {visibility: hidden;}
                 </style>
                 """
- st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 
 # ==========================================
