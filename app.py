@@ -14,18 +14,12 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from streamlit_local_storage import LocalStorage
 
-# Configuration de la page Streamlit
 st.set_page_config(page_title="Logiciel de Gestion de Rapports IA", page_icon="📋", layout="wide")
 
-# Initialisation du stockage local navigateur
 local_storage = LocalStorage()
 
-# Fichier JSON pour la persistance de l'historique
 HISTORIQUE_FILE = "historique.json"
 
-# ==========================================
-# FONCTIONS DE GESTION DE L'HISTORIQUE PERSISTANT (JSON)
-# ==========================================
 def charger_historique():
     """Charge l'historique depuis le fichier JSON s'il existe."""
     if os.path.exists(HISTORIQUE_FILE):
@@ -44,11 +38,9 @@ def sauvegarder_historique(historique):
     except Exception as e:
         st.error(f"Erreur lors de la sauvegarde de l'historique : {e}")
 
-# Initialisation de la mémoire de session avec les données du fichier JSON
 if "historique_rapports" not in st.session_state:
     st.session_state["historique_rapports"] = charger_historique()
 
-# Configuration de la clé API Groq
 if "GROQ_API_KEY" in st.secrets:
     client_groq = Groq(api_key=st.secrets["GROQ_API_KEY"])
 else:
@@ -57,13 +49,11 @@ else:
 
 GROQ_MODEL = "openai/gpt-oss-20b"
 
-# Configuration SMTP d'expédition
 SMTP_SERVER = st.secrets.get("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(st.secrets.get("SMTP_PORT", 587))
 SMTP_EMAIL = st.secrets.get("SMTP_EMAIL", "")
 SMTP_PASSWORD = st.secrets.get("SMTP_PASSWORD", "")
 
- # Masquage des éléments Streamlit (Mode Pro)
 hide_streamlit_style = """
                 <style>
                 #MainMenu {visibility: hidden;}
@@ -76,12 +66,8 @@ hide_streamlit_style = """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 
-# ==========================================
-# 1. BARRE LATÉRALE - CONFIGURATION DESTINATAIRE INDIVIDUEL ET GESTION HISTORIQUE
-# ==========================================
 st.sidebar.title("⚙️ Configuration Appareil")
 
-# Détection de l'e-mail dans le stockage local du navigateur
 email_actuel = local_storage.getItem("email_defaut_utilisateur")
 
 if not email_actuel:
@@ -114,7 +100,6 @@ if nbr_rapports > 0:
         st.sidebar.success("Historique réinitialisé avec succès.")
         st.rerun()
 
-# Configuration visuelle des 3 niveaux de gravité
 GRAVITE_CONFIG = {
     "VERT": {
         "color": "#16A34A",
@@ -136,9 +121,6 @@ GRAVITE_CONFIG = {
 st.title("📋 Logiciel Professionnel de Rédaction de Rapports")
 st.caption("Évaluation automatique du niveau de gravité par l'IA")
 
-# ==========================================
-# 2. FONCTION D'ENVOI E-MAIL SMTP
-# ==========================================
 def envoyer_email_rapport(destinataire, sujet, corps, pdf_data, pdf_filename):
     if not SMTP_EMAIL or not SMTP_PASSWORD:
         return False, "Identifiants SMTP d'expédition absents dans secrets.toml."
@@ -164,9 +146,6 @@ def envoyer_email_rapport(destinataire, sujet, corps, pdf_data, pdf_filename):
     except Exception as e:
         return False, f"Erreur d'envoi d'e-mail : {str(e)}"
 
-# ==========================================
-# 3. FORMULAIRE ET DONNÉES ENTRANTES
-# ==========================================
 col_left, col_right = st.columns([1, 1])
 
 with col_left:
@@ -203,7 +182,6 @@ notes_brutes = st.text_area(
     placeholder="Saisissez vos observations. L'IA analysera la gravité et classera vos remarques sous de grands titres."
 )
 
-# Choix du destinataire e-mail
 st.subheader("📬 Destinataire")
 choix_destinataire = st.radio("Sélection du destinataire :", ["E-mail par défaut de cet appareil", "Saisir un autre destinataire"], horizontal=True)
 
@@ -218,9 +196,6 @@ if choix_destinataire == "E-mail par défaut de cet appareil":
 else:
     email_destinataire_final = st.text_input("Saisissez l'adresse e-mail du destinataire :")
 
-# ==========================================
-# 4. GÉNÉRATION PDF (CERCLE DE GRAVITÉ EN HAUT À GAUCHE)
-# ==========================================
 def generer_pdf(entreprise, redacteur, email_red, gravite_key, titre, contenu):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
@@ -229,12 +204,10 @@ def generer_pdf(entreprise, redacteur, email_red, gravite_key, titre, contenu):
 
     cfg_g = GRAVITE_CONFIG.get(gravite_key, GRAVITE_CONFIG["VERT"])
 
-    # --- 1. PUCE DE GRAVITÉ EN HAUT À GAUCHE ---
     cercle_html = f"<font color='{cfg_g['color']}' size=20><b>●</b></font> <font color='#334155' size=11><b>GRAVITÉ : {cfg_g['label'].upper()}</b></font>"
     story.append(Paragraph(cercle_html, styles['Normal']))
     story.append(Spacer(1, 10))
 
-    # --- 2. INFORMATIONS ÉMETTEUR ---
     meta_text = f"<b>Entreprise :</b> {entreprise}<br/><b>Rédacteur :</b> {redacteur}"
     if email_red:
         meta_text += f"<br/><b>E-mail :</b> {email_red}"
@@ -249,12 +222,10 @@ def generer_pdf(entreprise, redacteur, email_red, gravite_key, titre, contenu):
     story.append(t_meta)
     story.append(Spacer(1, 15))
 
-    # --- 3. TITRE DU RAPPORT ---
     title_style = ParagraphStyle('TitreStyle', parent=styles['Heading1'], fontSize=15, leading=19, textColor=colors.HexColor("#0F172A"), spaceAfter=12)
     story.append(Paragraph(titre.upper(), title_style))
     story.append(Spacer(1, 8))
 
-    # --- 4. CORPS DU RAPPORT ---
     h2_style = ParagraphStyle('H2Style', parent=styles['Heading2'], fontSize=11, leading=15, textColor=colors.HexColor("#1E293B"), spaceBefore=10, spaceAfter=4)
     body_style = ParagraphStyle('BodyStyle', parent=styles['Normal'], fontSize=9.5, leading=13.5, spaceAfter=5)
 
@@ -272,9 +243,6 @@ def generer_pdf(entreprise, redacteur, email_red, gravite_key, titre, contenu):
     buffer.seek(0)
     return buffer.getvalue()
 
-# ==========================================
-# 5. EXÉCUTION, ANALYSE IA ET SAUVEGARDE HISTORIQUE
-# ==========================================
 if st.button("🚀 Générer et Envoyer le Rapport"):
     if not email_destinataire_final:
         st.error("Veuillez renseigner ou enregistrer un e-mail destinataire valide.")
@@ -331,7 +299,6 @@ if st.button("🚀 Générer et Envoyer le Rapport"):
                 
                 reponse_brute = completion.choices[0].message.content
 
-                # Extraction de la gravité
                 gravite_detectee = "VERT"
                 lines = reponse_brute.split("\n")
                 first_line = lines[0].upper()
@@ -347,9 +314,7 @@ if st.button("🚀 Générer et Envoyer le Rapport"):
                 else:
                     texte_structure = reponse_brute.strip()
 
-                # ----------------------------------------------------
-                # SAUVEGARDE DANS LE FICHIER HISTORIQUE JSON
-                # ----------------------------------------------------
+            
                 cle_rapport = titre_rapport.strip()
                 st.session_state["historique_rapports"][cle_rapport] = {
                     "entreprise": nom_entreprise,
@@ -359,7 +324,6 @@ if st.button("🚀 Générer et Envoyer le Rapport"):
                 }
                 sauvegarder_historique(st.session_state["historique_rapports"])
 
-                # Affichage Cercle de Gravité en haut à gauche
                 cfg_g = GRAVITE_CONFIG[gravite_detectee]
                 st.markdown(
                     f"<div style='display: flex; align-items: center; margin-bottom: 15px;'>"
@@ -373,7 +337,6 @@ if st.button("🚀 Générer et Envoyer le Rapport"):
                 st.markdown("---")
                 st.markdown(texte_structure)
 
-                # Génération du PDF
                 pdf_bytes = generer_pdf(
                     nom_entreprise, 
                     nom_redacteur, 
@@ -383,7 +346,6 @@ if st.button("🚀 Générer et Envoyer le Rapport"):
                     texte_structure
                 )
 
-                # Envoi de l'e-mail
                 sujet_mail = f"[{gravite_detectee}] {titre_rapport} - {nom_entreprise}"
                 corps_mail = f"Bonjour,\n\nVeuillez trouver ci-joint le rapport '{titre_rapport}' rédigé par {nom_redacteur} ({nom_entreprise}).\n\nGravité évaluée par l'IA : {cfg_g['label']}\n\nCordialement,"
                 nom_fichier_pdf = f"Rapport_{titre_rapport.replace(' ', '_')}.pdf"
