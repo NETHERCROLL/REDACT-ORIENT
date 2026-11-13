@@ -150,9 +150,9 @@ col_left, col_right = st.columns([1, 1])
 
 with col_left:
     st.subheader("1. Informations de l'Émetteur")
-    nom_entreprise = st.text_input("Nom de l'entreprise * :", placeholder="ex: Groupe Construction SA")
-    nom_redacteur = st.text_input("Nom et Prénom du rédacteur * :", placeholder="ex: Jean Dupont")
-    email_redacteur = st.text_input("Adresse e-mail du rédacteur (optionnel) :", placeholder="ex: j.dupont@entreprise.com")
+    nom_entreprise = st.text_input("Nom de l'entreprise  :", placeholder="ex: TEST TRAVEL")
+    nom_redacteur = st.text_input("Nom et Prénom du rédacteur :", placeholder="ex: AGENT TEST TRAVEL")
+    email_redacteur = st.text_input("Adresse e-mail du rédacteur (optionnel) :", placeholder="ex: testtravel@entreprise.com")
 
 with col_right:
     st.subheader("2. Paramètres du Rapport")
