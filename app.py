@@ -58,7 +58,15 @@ hide_streamlit_style = """
                 <style>
                 #MainMenu {visibility: hidden;}
                 footer {visibility: hidden;}
-                header {visibility: hidden;}
+                /* Conserver l'en-tête pour rendre disponible le bouton natif
+                   à double flèche qui masque et réaffiche la barre latérale. */
+                header[data-testid="stHeader"] {
+                    visibility: visible;
+                    background: transparent;
+                }
+                header[data-testid="stHeader"] [data-testid="stToolbar"] {
+                    visibility: hidden;
+                }
                 .stAppDeployButton {display:none;}
                 div[data-testid="stStatusWidget"] {visibility: hidden;}
                 </style>
